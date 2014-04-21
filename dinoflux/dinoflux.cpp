@@ -12,6 +12,7 @@
 
 int CDinoflux::m_nDataPool = -1;
 string CDinoflux::m_strCuckooHost = "5.9.23.53"; 
+list<string> CDinoflux::m_lstExts;
 
 /**
  *	InitService called from c-icap for initialize service data
@@ -100,6 +101,81 @@ int CDinoflux::Allow204( ci_request_t *pRequest, ci_membuf_t **ppMemBuf )
 	return CI_MOD_ALLOW204;
 }
 
+/**
+ *	GetResource Obtains the requested resource, that is, the string located between "GET" and "HTTP/1.X"
+ *	\param pRequest c-icap 
+ *	\param szRes Output buffer
+ *	\param nSize Output buffer size
+ *	\param bRetQuery true if want to copy query part ex '?param1=0'
+ */
+void CDinoflux::GetResource( ci_request_t * pRequest, char *szRes, size_t nSize, bool bRetQuery )
+{
+    szRes[ 0 ] = 0;
+    ci_headers_list_t *pReqHeaders = ci_http_request_headers( pRequest );
+    size_t nLast = nSize - 1;
+    if( pReqHeaders )
+    {
+        char *pHttp = ci_http_request( pRequest );
+        //ci_debug_printf( 2, "GetResource from: %s\n", pHttp );
+        if( !pHttp )
+        {
+            ci_debug_printf( 2, "No Http Headers!!!!\n" );
+            return;
+        }
+
+        while( *pHttp != ' ' && *pHttp )
+            ++pHttp;
+        if( !*pHttp )
+        {
+            ci_debug_printf( 2, "Bad Http Header!!!!\n" );
+            return;
+        }
+        int nIndex = 0;
+        ++pHttp;
+        if( bRetQuery )
+        {
+            while( *pHttp && *pHttp != ' ' && nIndex < nLast )
+                szRes[ nIndex++ ] = *pHttp, ++pHttp;
+        }
+        else
+        {
+            while( *pHttp && *pHttp != ' ' && *pHttp != '?' && nIndex < nLast )
+                szRes[ nIndex++ ] = *pHttp, ++pHttp;
+        }
+        szRes[ nIndex ] = 0;
+    }
+    else
+    {
+        ci_debug_printf( 2, "No Headers!!!!!\n" );
+    }
+}
+
+/**
+ *	CheckContentType Check if the content type is supported for parse with AC
+ *	\param szContentType string with the content type
+ *	\return true for supported types, false for unsupported
+ */
+
+static int ToLower( int n )
+{
+    return tolower( n );
+}
+
+
+bool CDinoflux::CheckExtension( const char *szRes )
+{
+    string strRes = szRes;
+    transform( strRes.begin(), strRes.end(), strRes.begin(), ToLower );
+    for( list<string>::iterator it = m_lstExts.begin(); it != m_lstExts.end(); it++ )
+    {
+        size_t nExtLength = it->length();
+        if( nExtLength + 1 > strRes.length() && !it->compare( strRes.c_str() + strRes.length() - nExtLength )
+                && strRes[ strRes.length() - nExtLength - 1 ] == '.' )
+            return true;
+    }
+    return false;
+}
+
 
 /**
  *	CheckPreview called from c-icap whith the request headers, befor get data from server
@@ -108,26 +184,47 @@ int CDinoflux::Allow204( ci_request_t *pRequest, ci_membuf_t **ppMemBuf )
  *	\param pReq The c-icap request where the headers arrives
  *	\return c-icap return values
  */
-int CDinoflux::CheckPreview( char *pPreviewData, int nPreviewDataLen, ci_request_t * pRequest )
+int CDinoflux::CheckPreview( char *pPreviewData, int nPreviewDataLen, ci_request_t * pReq )
 {
 	//Example for get C++ class from service data
 	//CUserData *pData = reinterpret_cast<CUserData *>(ci_service_data( pReq ));
 
 	//ci_headers_list_t *pReqHeaders = ci_http_request_headers( pReq ); //Not necesary for response checks
-	ci_membuf_t **ppData = reinterpret_cast<ci_membuf_t**>(ci_service_data( pRequest ));
+	ci_membuf_t **ppData = reinterpret_cast<ci_membuf_t**>(ci_service_data( pReq));
+
+	int nRet = CI_OK;
+
+	char szResource[ 4096 ] = "";
+	GetResource( pReq, szResource, 4096 );
+
 	if( !ppData )
 		return CI_ERROR;
 
-	ci_headers_list_t *pResponseHeaders = ci_http_response_headers( pRequest );
+	ci_headers_list_t *pResponseHeaders = ci_http_response_headers( pReq);
+
 
 	if( pResponseHeaders )
 	{
 		//Write your code here
 		//For Check IO -> return CI_MOD_CONTINUE;
 		//If some serious error occurs -> return CI_ERROR;
+
+		if(CheckExtension( szResource ))
+		{
+			nRet = CI_MOD_CONTINUE;
+		}
+
+
+
 	}
 	
-	return Allow204( pRequest, ppData ); //Allow to continue
+
+	if(!ci_req_hasbody( pReq ) )
+		return Allow204( pReq, ppData ); //Allow to continue
+
+
+	return nRet;
+
 }
 
 /**
@@ -190,7 +287,7 @@ int CDinoflux::CheckIO( char *pWriteBuffer, int *nWriteLen, char *pReadBuffer, i
 }
 
 /**
- *	DinofluxConfig Sample for get configurations from dnoflux.conf
+ *	DinofluxConfig get cuckoo host from dinoflux.conf
  *
  *	\param szDirective "DinofluxConfig"
  *	\param argv list of arguments
@@ -207,11 +304,39 @@ int CDinoflux::DinofluxConfig( char *szDirective, char **argv, void *pData )
 	return CI_OK;
 }
 
+
+
+/**
+ *      DinofluxConfig get extensions from dnoflux.conf
+ *
+ *      \param szDirective "ExtensionsConfig"
+ *      \param argv list of arguments
+ *      \return c-icap return values
+ */
+
+int CDinoflux::ExtensionsConfig( char *szDirective, char **argv, void *pData )
+{
+        //Here you can save the contents of argv
+
+        if(strlen(argv[ 0 ])> 0){
+          string tempstr = (argv[ 0 ]);
+	  istringstream ss(tempstr);
+	  string token;
+	  while(std::getline(ss, token, ',')) {
+	    m_lstExts.push_back(token);
+	  }
+	}
+        return CI_OK;
+}
+
+
+
 /**
  *	ConfigurationVariables c-icap structure for load configuration file
  */
 struct ci_conf_entry CDinoflux::ConfigurationVariables[] = {
   {const_cast<char*>("DinofluxConfig"), NULL, CDinoflux::DinofluxConfig, NULL},
+  {const_cast<char*>("ExtensionsConfig"), NULL, CDinoflux::ExtensionsConfig, NULL},
   {NULL, NULL, NULL, NULL}
 };
 

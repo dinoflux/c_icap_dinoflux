@@ -17,19 +17,27 @@ public:
 	static void *InitRequestData( ci_request_t * pReq );
 	static void ReleaseData( void *pData );
 
+	static void GetResource(ci_request_t * pRequest, char *szRes, size_t nSize, bool bRetQuery=false);
+
+
 	static int CheckPreview( char *pPreviewData, int nPreviewDataLen, ci_request_t * pReq );
 	static int CheckProcess( ci_request_t * pReq );
 	static int CheckIO( char *wbuf, int *wlen, char *rbuf, int *rlen, int iseof, ci_request_t * pReq );
 
 	//Configuration
 	static int DinofluxConfig( char *szDirective, char **argv, void *pData );
+	static int ExtensionsConfig( char *szDirective, char **argv, void *pData );
 	static ci_conf_entry ConfigurationVariables[];
+
+	static list<string> m_lstExts;
+
 
 private:
 	//Service Data
 	static int m_nDataPool; //Identifier for data pool assigned by c-icap
 	static string m_strCuckooHost; //Cuckoo hostname
 	//Helper Function
+	static bool CheckExtension( const char *szRes );
 	static int Allow204( ci_request_t *pRequest, ci_membuf_t **ppMemBuf );
 };
 
